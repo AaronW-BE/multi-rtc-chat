@@ -63,16 +63,22 @@ class App extends Component{
 
     let pc;
 
-    _socket.on('SIGNALING_OFFER', ({sdp, roomId}) => {
+    _socket.on('SIGNALING_OFFER', async ({sdp, roomId}) => {
       console.log('SIGNALING_OFFER', sdp, roomId)
       console.log(`receive remote description`);
       const remoteDescription = new RTCSessionDescription(sdp);
-      let peerConnection = this.createPC();
-      peerConnection.setRemoteDescription(remoteDescription).then(() => {
+      pc = this.createPC();
+      pc.setRemoteDescription(remoteDescription).then(() => {
         console.log('set remote description')
       });
-      pc = peerConnection
 
+      let answer = await pc.createAnswer()
+      await pc.setLocalDescription(answer);
+
+      this.state.socket.emit('SIGNALING_ANSWER', {
+        sdp: answer,
+        roomId
+      })
     })
 
     _socket.on('SIGNALING_CANDIDATE', ({candidate, roomId}) => {
@@ -80,6 +86,14 @@ class App extends Component{
       pc.addIceCandidate(candidate).then(() => {
         console.log('added candidate')
       })
+    })
+
+    _socket.on('SIGNALING_ANSWER', ({sdp, roomId}) => {
+      console.log(`receive remote answer from ${roomId}`);
+      const remoteDescription = new RTCSessionDescription(sdp);
+      this.pc.setRemoteDescription(remoteDescription).then(() => {
+        console.log('remote description settled')
+      });
     })
     _socket.connect();
   }
@@ -106,6 +120,9 @@ class App extends Component{
 
   createPC() {
     let pc = new RTCPeerConnection({
+      iceServers: [
+        {url: 'stun:stun.ekiga.net'},
+      ]
     })
     pc.onnegotiationneeded = async () => {
       console.log('onnegotiationneeded')
@@ -150,9 +167,9 @@ class App extends Component{
       if (mediaStream) {
         this.localVideo.current.srcObject = mediaStream;
 
-        let pc = this.createPC();
+        this.pc = this.createPC();
         mediaStream.getTracks().forEach(track => {
-          pc.addTrack(track, mediaStream);
+          this.pc.addTrack(track, mediaStream);
         })
       }
     })

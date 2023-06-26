@@ -100,4 +100,11 @@ socketIO.sockets.on('connection', socket => {
       candidate, roomId
     })
   })
+
+  socket.on('SIGNALING_ANSWER', ({sdp, roomId}) => {
+    console.warn('SIGNALING_ANSWER', roomId)
+    socket.to(roomId).emit('SIGNALING_ANSWER', {
+      sdp, roomId
+    })
+  })
 })
