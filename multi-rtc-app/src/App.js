@@ -17,6 +17,8 @@ class App extends Component{
     }
     this.localVideo = createRef();
     this.remoteVideo = createRef();
+
+    this.peerConnections = {};
   }
 
   componentDidMount() {
@@ -61,13 +63,14 @@ class App extends Component{
       alert('room full' +  roomId + "-" + userCount)
     })
 
-    let pc;
 
-    _socket.on('SIGNALING_OFFER', async ({sdp, roomId}) => {
+    _socket.on('SIGNALING_OFFER', async ({sdp, roomId, from}) => {
       console.log('SIGNALING_OFFER', sdp, roomId)
       console.log(`receive remote description`);
       const remoteDescription = new RTCSessionDescription(sdp);
-      pc = this.createPC();
+
+
+      let pc = this.createPC(); // 被叫
       pc.setRemoteDescription(remoteDescription).then(() => {
         console.log('set remote description')
       });
@@ -79,13 +82,23 @@ class App extends Component{
         sdp: answer,
         roomId
       })
+
+      this.peerConnections[from] = pc
     })
 
-    _socket.on('SIGNALING_CANDIDATE', ({candidate, roomId}) => {
-      console.log('SIGNALING_CANDIDATE', candidate, roomId)
-      pc.addIceCandidate(candidate).then(() => {
-        console.log('added candidate')
-      })
+    _socket.on('SIGNALING_CANDIDATE', ({candidate, roomId, from}) => {
+      console.log('SIGNALING_CANDIDATE', candidate, roomId, from)
+      console.log(this.peerConnections)
+
+      if (this.peerConnections[from]) {
+        this.peerConnections[from].addIceCandidate(candidate).then(() => {
+          console.log('added candidate')
+        });
+      } else {
+        this.pc && this.pc.addIceCandidate(candidate).then(() => {
+          console.log('added candidate from local')
+        })
+      }
     })
 
     _socket.on('SIGNALING_ANSWER', ({sdp, roomId}) => {
@@ -109,6 +122,10 @@ class App extends Component{
       currentJoinedRoomId: this.state.roomId
     })
     this.state.socket.emit('join', {roomId: this.state.roomId});
+  }
+
+  quitRoom() {
+    console.warn("quit room")
   }
 
   onRoomIdInput(e) {
@@ -167,7 +184,7 @@ class App extends Component{
       if (mediaStream) {
         this.localVideo.current.srcObject = mediaStream;
 
-        this.pc = this.createPC();
+        this.pc = this.createPC(); // 主叫
         mediaStream.getTracks().forEach(track => {
           this.pc.addTrack(track, mediaStream);
         })
@@ -205,6 +222,10 @@ class App extends Component{
           <div className='chat-video'>
             <video autoPlay controls={false} ref={this.remoteVideo} />
           </div>
+        </div>
+
+        <div>
+          <button disabled={!this.state.currentJoinedRoomId} onClick={this.quitRoom.bind(this)}>QUIT ROOM</button>
         </div>
       </div>
     );

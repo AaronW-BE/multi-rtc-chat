@@ -88,23 +88,30 @@ socketIO.sockets.on('connection', socket => {
     console.log('disconnected')
   })
 
+  // OFFER SDP
   socket.on('SIGNALING_OFFER', ({sdp, roomId}) => {
     console.warn('SIGNALING_OFFER')
     socket.to(roomId).emit('SIGNALING_OFFER', {
-      sdp, roomId
-    })
-  })
-  socket.on('SIGNALING_CANDIDATE', ({candidate, roomId}) => {
-    console.warn('SIGNALING_CANDIDATE', roomId)
-    socket.to(roomId).emit('SIGNALING_CANDIDATE', {
-      candidate, roomId
+      sdp, roomId,
+      from: socket.id
     })
   })
 
+  // ice candidate
+  socket.on('SIGNALING_CANDIDATE', ({candidate, roomId}) => {
+    console.warn('SIGNALING_CANDIDATE', roomId)
+    socket.to(roomId).emit('SIGNALING_CANDIDATE', {
+      candidate, roomId,
+      from: socket.id
+    })
+  })
+
+  // answer sdp
   socket.on('SIGNALING_ANSWER', ({sdp, roomId}) => {
     console.warn('SIGNALING_ANSWER', roomId)
     socket.to(roomId).emit('SIGNALING_ANSWER', {
-      sdp, roomId
+      sdp, roomId,
+      from: socket.id
     })
   })
 })
