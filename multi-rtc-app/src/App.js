@@ -19,6 +19,7 @@ class App extends Component{
     this.remoteVideo = createRef();
 
     this.peerConnections = {};
+    this.localPeerConnection = null;
   }
 
   componentDidMount() {
@@ -70,8 +71,29 @@ class App extends Component{
       const remoteDescription = new RTCSessionDescription(sdp);
 
 
-      let pc = this.createPC(); // 被叫
-      pc.setRemoteDescription(remoteDescription).then(() => {
+      // let pc = this.createPC(); // 被叫
+      let pc = new RTCPeerConnection({
+        iceServers: [
+          {url: 'stun:stun.ekiga.net'},
+        ]
+      })
+
+      pc.onicecandidate = (ev) => {
+        if (ev.candidate) {
+          console.info('被叫ice candidate 发送')
+          this.state.socket.emit('SIGNALING_CANDIDATE', {
+            roomId: this.state.roomId,
+            candidate: ev.candidate
+          })
+        }
+      }
+
+      pc.ontrack = ev => {
+        console.log('被叫获得视频流', ev.streams)
+        this.remoteVideo.current.srcObject = ev.streams[0];
+      }
+
+      pc.setRemoteDescription(sdp).then(() => {
         console.log('set remote description')
       });
 
@@ -88,23 +110,25 @@ class App extends Component{
 
     _socket.on('SIGNALING_CANDIDATE', ({candidate, roomId, from}) => {
       console.log('SIGNALING_CANDIDATE', candidate, roomId, from)
-      console.log(this.peerConnections)
 
-      if (this.peerConnections[from]) {
-        this.peerConnections[from].addIceCandidate(candidate).then(() => {
+      if (this.localPeerConnection) {
+        console.info('主叫方添加ice')
+        this.localPeerConnection.addIceCandidate(candidate).then(() => {
+          console.log('added candidate from local')
+        });
+      }else {
+        console.log('from', from)
+        console.info('被叫方添加ice')
+        this.peerConnections[from] && this.peerConnections[from].addIceCandidate(candidate).then(() => {
           console.log('added candidate')
         });
-      } else {
-        this.pc && this.pc.addIceCandidate(candidate).then(() => {
-          console.log('added candidate from local')
-        })
       }
     })
 
     _socket.on('SIGNALING_ANSWER', ({sdp, roomId}) => {
       console.log(`receive remote answer from ${roomId}`);
-      const remoteDescription = new RTCSessionDescription(sdp);
-      this.pc.setRemoteDescription(remoteDescription).then(() => {
+      // const remoteDescription = new RTCSessionDescription(sdp);
+      this.localPeerConnection.setRemoteDescription(sdp).then(() => {
         console.log('remote description settled')
       });
     })
@@ -135,58 +159,50 @@ class App extends Component{
     })
   }
 
-  createPC() {
-    let pc = new RTCPeerConnection({
-      iceServers: [
-        {url: 'stun:stun.ekiga.net'},
-      ]
-    })
-    pc.onnegotiationneeded = async () => {
-      console.log('onnegotiationneeded')
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
-
-      this.state.socket.emit('SIGNALING_OFFER', {
-        sdp: pc.localDescription,
-        roomId: this.state.roomId
-      })
-    }
-    pc.onicecandidate = (ev) => {
-      if (ev.candidate) {
-        console.log('on icecandidate');
-        console.log('send icecandidate')
-
-
-        this.state.socket.emit('SIGNALING_CANDIDATE', {
-          roomId: this.state.roomId,
-          candidate: ev.candidate
-        })
-      }
-    }
-    pc.onicegatheringstatechange = () => {
-      console.log(`onicegatheringstatechange, pc.iceGatheringState is ${pc.iceGatheringState}.`);
-    }
-    pc.oniceconnectionstatechange = () => {
-      console.log(`oniceconnectionstatechange, pc.iceConnectionState is ${pc.iceConnectionState}.`);
-    }
-    pc.onsignalingstatechange = () => {
-      console.log(`onsignalingstatechange, pc.signalingstate is ${pc.signalingState}.`);
-    }
-    pc.ontrack = (ev) => {
-      console.log('on track', ev.streams)
-      this.remoteVideo.current.srcObject = ev.streams[0];
-    }
-    return pc
-  }
-
   getLocalMediaStream() {
     navigator.mediaDevices.getUserMedia({audio: false, video: true}).then(mediaStream => {
       if (mediaStream) {
         this.localVideo.current.srcObject = mediaStream;
 
-        this.pc = this.createPC(); // 主叫
+        this.localPeerConnection = new RTCPeerConnection({
+          iceServers: [
+            {url: 'stun:stun.ekiga.net'},
+          ]
+        })
+        this.localPeerConnection.onnegotiationneeded = async (ev) => {
+          console.info('主叫发送offer')
+          const offer = await this.localPeerConnection.createOffer();
+          await this.localPeerConnection.setLocalDescription(offer);
+
+          this.state.socket.emit('SIGNALING_OFFER', {
+            sdp: this.localPeerConnection.localDescription,
+            roomId: this.state.roomId
+          })
+        }
+        this.localPeerConnection.onicecandidate = (ev) => {
+          if (ev.candidate) {
+            this.state.socket.emit('SIGNALING_CANDIDATE', {
+              roomId: this.state.roomId,
+              candidate: ev.candidate
+            })
+          }
+        }
+        // this.localPeerConnection.onicegatheringstatechange = () => {
+        //   console.log(`onicegatheringstatechange, pc.iceGatheringState is ${pc.iceGatheringState}.`);
+        // }
+        // this.localPeerConnection.oniceconnectionstatechange = () => {
+        //   console.log(`oniceconnectionstatechange, pc.iceConnectionState is ${pc.iceConnectionState}.`);
+        // }
+        // this.localPeerConnection.onsignalingstatechange = () => {
+        //   console.log(`onsignalingstatechange, pc.signalingstate is ${pc.signalingState}.`);
+        // }
+        this.localPeerConnection.ontrack = (ev) => {
+          console.log('on track from far', ev.streams)
+          this.remoteVideo.current.srcObject = ev.streams[0];
+        }
+
         mediaStream.getTracks().forEach(track => {
-          this.pc.addTrack(track, mediaStream);
+          this.localPeerConnection.addTrack(track, mediaStream);
         })
       }
     })
@@ -217,10 +233,10 @@ class App extends Component{
 
         <div className="video-list">
           <div className='chat-video'>
-            <video autoPlay controls={false} ref={this.localVideo} />
+            <video autoPlay={true} controls={false} ref={this.localVideo} />
           </div>
           <div className='chat-video'>
-            <video autoPlay controls={false} ref={this.remoteVideo} />
+            <video autoPlay={true} controls={false} ref={this.remoteVideo} />
           </div>
         </div>
 
